@@ -1,0 +1,100 @@
+#!/usr/bin/python
+
+HAS_PEXPECT = False
+try:
+    import pexpect
+    HAS_PEXPECT = True
+except ImportError:
+    pass
+
+DOCUMENTATION = '''
+---
+module: onie_img_install
+short_description: Installs an image via console on an ONIE enabled device.
+description:
+  - You can specify management ip address and netmask if you can not rely
+    on DHCP
+options:
+  console:
+    description:
+      - Console device ip address
+    required: true
+  port:
+    description:
+      - Console device port number
+    required: true
+  timeout:
+    description:
+      - Operation timeout
+    required: false
+    default: 100
+  image_url:
+    description:
+      - Url on an image to be installed
+    required: true
+  mgmt_ip:
+    description:
+      - Management interface IP address to change to
+        (must be used in conjunction with mgmt_mask)
+    required: false
+  mgmt_mask:
+    description:
+      - Management interface IP netmask to change to
+        (must be used in conjunction with mgmt_ip)
+    required: false
+  activate:
+    description:
+      - Respond to activate console ONIE welcome message
+    required: false
+    default: True
+requirements: []
+author:
+    - "Sergey Sudakovich(@sergeyhush)"
+'''
+
+
+def main():
+    module = AnsibleModule(
+        argument_spec=dict(
+            console=dict(required=True),
+            port=dict(required=True),
+            timeout=dict(default='100'),
+            image_url=dict(required=True),
+            mgmt_ip=dict(),
+            mgmt_netmask=dict(),
+            activate=dict(default=True),
+        ),
+    )
+    if not HAS_PEXPECT:
+        module.fail_json(msg="pexpect module required for onie_img_install")
+    console = module.params.get('console')
+    port = int(module.params.get('port')) + 6000
+    timeout = int(module.params.get('timeout'))
+    image_url = module.params.get('image_url')
+    telnet = pexpect.spawn("telnet {console} {port}".format(console=console,
+                                                            port=port),
+                           timeout=timeout)
+    mgmt_ip = module.params.get('mgmt_ip')
+    mgmt_netmask = module.params.get('mgmt_netmask')
+    activate = module.params.get('activate')
+    try:
+        if activate:
+            telnet.expect('Please press Enter to activate this console.')
+        telnet.sendline("")
+        telnet.expect("ONIE:.*")
+        telnet.sendline("")
+        telnet.expect("ONIE:/ #", timeout=timeout)
+        if mgmt_ip and mgmt_netmask:
+            cmd = "ifconfig eth0 {address} netmask {netmask} up"
+            telnet.sendline(cmd.format(address=mgmt_ip, netmask=mgmt_netmask))
+            telnet.expect("ONIE:/ #", timeout=5)
+        telnet.sendline("install_url {}".format(image_url))
+        telnet.expect("ONIE: Executing installer:", timeout=10)
+    finally:
+        telnet.close()
+    module.exit_json(changed=True)
+
+from ansible.module_utils.basic import *
+
+if __name__ == '__main__':
+    main()
